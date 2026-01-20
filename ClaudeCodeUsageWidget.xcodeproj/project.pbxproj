@@ -1,0 +1,42 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+		mainGroup = {
+			isa = PBXGroup;
+			children = (
+				ClaudeCodeUsageWidget,
+			);
+			sourceTree = "<group>";
+		};
+		ClaudeCodeUsageWidget = {
+			isa = PBXGroup;
+			children = (
+				"ClaudeCodeUsageApp.swift",
+				"UsageMonitor.swift",
+				"UsageView.swift",
+				"Info.plist",
+			);
+			path = ClaudeCodeUsageWidget;
+			sourceTree = "<group>";
+		};
+	};
+	rootObject = {
+		isa = PBXProject;
+		attributes = {
+			BuildIndependentTargetsInParallel = 1;
+			LastSwiftUpdateCheck = 1500;
+			LastUpgradeCheck = 1500;
+		};
+		compatibilityVersion = "Xcode 14.0";
+		developmentRegion = en;
+		hasScannedForEncodings = 0;
+		mainGroup = mainGroup;
+		productRefGroup = Products;
+		projectDirPath = "";
+		projectRoot = "";
+	};
+}
