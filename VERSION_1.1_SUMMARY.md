@@ -1,5 +1,28 @@
 # Version 1.1.0 - What's New! 🎉
 
+> ## ⚠️ HISTORICAL DOCUMENT — DOES NOT DESCRIBE THE CURRENT APP
+>
+> This file is the release note for **version 1.1.0 (January 2025)**. It is kept
+> as a record of what shipped then. The app is now at **2.6**, and *none* of the
+> features below still exist:
+>
+> - **No API key.** 1.1 asked you for an Anthropic Console key. Since 2.0 the
+>   app reads the OAuth token Claude Code already stores in your login Keychain,
+>   and there is no key field anywhere.
+> - **No notifications**, no threshold alerts.
+> - **No statistics window**, no charts, no usage history, no CSV export.
+> - **No preferences window** and no refresh-interval slider. Settings has two
+>   read-mostly sections: which profile the menu bar tracks, and a list of the
+>   profiles Claude Code has logged in.
+> - **No launch-at-login toggle.**
+> - The five Swift files listed under "New Components" below —
+>   `NotificationManager.swift`, `UsageHistoryManager.swift`,
+>   `StatisticsView.swift`, `PreferencesView.swift`, `LaunchAtLoginHelper.swift`
+>   — were deleted in 2.0, along with `UsageView.swift` and `AppConfig.swift`.
+>
+> For what the app actually does today, see [README.md](README.md),
+> [FEATURES.md](FEATURES.md) and [CHANGELOG.md](CHANGELOG.md).
+
 A major update to Claude Code Usage Widget with exciting new features!
 
 ## 🚀 New Features

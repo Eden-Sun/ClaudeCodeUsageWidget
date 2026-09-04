@@ -1,45 +1,25 @@
 # Claude Code Usage Widget for macOS
 
-A native macOS menu bar app that displays your Claude Code API usage in real-time. Built with Swift and AppKit for optimal performance and native macOS integration.
-
-![Claude Code Usage Widget](screenshot.png)
+A native macOS menu bar app that shows how much of your Claude subscription
+limits you have **left** — the 5-hour session window and the weekly caps — in
+real time. Built with Swift and SwiftUI.
 
 ## Features
 
-- **Menu Bar Integration**: Always visible usage percentage in your macOS menu bar
-- **Real-time Monitoring**: Auto-refreshes usage data every 5 minutes (customizable)
-- **Visual Indicators**: Color-coded usage levels (green → yellow → orange → red → critical)
-- **Detailed Popover**: Click to see detailed usage statistics
-- **Circular Progress**: Beautiful circular progress indicator showing usage percentage
-- **Usage Breakdown**: Shows used, remaining, and total limit
-- **Reset Timer**: Displays when your usage will reset
-- **Smart Notifications**: Get alerts at 75%, 85%, and 95% usage
-- **Usage Statistics**: Track usage trends over time with beautiful charts
-- **Data Export**: Export usage history to CSV for analysis
-- **Launch at Login**: Automatically start with macOS
-- **Secure API Key Storage**: Uses macOS Keychain for secure credential storage
-- **Comprehensive Preferences**: Easy-to-use preferences window
-- **Right-Click Menu**: Quick access to all features
-- **Low Resource Usage**: Native Swift app with minimal CPU and memory footprint
-
-## Screenshots
-
-### Menu Bar Display
-The widget shows current usage percentage directly in your menu bar with a color-coded indicator.
-
-### Popover Details
-Click the menu bar icon to see:
-- Large circular progress indicator
-- Used requests count
-- Remaining requests
-- Total limit
-- Time until reset
+- **Menu Bar Integration**: Remaining 5-hour headroom, followed by the weekly figure whenever the response carries one (and, on Max plans, Fable's weekly cap)
+- **Both Windows**: 5-hour session window and the weekly cap, each with its reset time
+- **Per-Model Caps**: Surfaces the scoped weekly limits (e.g. Fable, Opus) that the top-level numbers hide
+- **Multiple Profiles**: Every `CLAUDE_CONFIG_DIR` Claude Code has logged in gets its own column in the popover and its own line in the menu bar; pick which one the menu bar leads with
+- **Zero Configuration**: Reuses the login Claude Code already has — no API key, no org ID, no cookie
+- **Auto Refresh**: Polls every 5 minutes, and renews an expired OAuth token itself rather than waiting for the CLI
+- **Colour Coding**: Green above 50% left, yellow 20–50% left, red below 20%
+- **Low Resource Usage**: Native Swift app with a minimal footprint
 
 ## Requirements
 
 - macOS 13.0 (Ventura) or later
 - Xcode 15.0 or later (for building)
-- Claude API key (get from [Anthropic Console](https://console.anthropic.com))
+- Claude Code installed and signed in (`claude login`) on a Pro or Max plan
 
 ## Installation
 
@@ -61,25 +41,48 @@ Click the menu bar icon to see:
    - Press `Cmd + R` to build and run
    - Or go to `Product > Run`
 
-4. **Configure API Key**
-   - Click the menu bar icon
-   - Click the gear icon (⚙️) in the popover
-   - Enter your Claude API key
-   - Click "Save"
+4. **Allow Keychain access**
+   - On first launch macOS asks whether the app may read the
+     `Claude Code-credentials` Keychain item
+   - Click **Always Allow** — this is the login token the app reads to
+     authenticate; there is nothing else to configure
 
-### Option 2: Download Pre-built App (Coming Soon)
+### Option 2: Build a DMG
 
-Download the latest `.dmg` file from the [Releases](https://github.com/yourusername/claude-code-usage-widget/releases) page.
+```bash
+./scripts/make-dmg.sh     # -> dist/ClaudeCodeUsageWidget-<version>.dmg
+```
+
+Builds Release, stages the app next to an `/Applications` symlink, and produces
+a compressed disk image. No external tooling required.
+
+If the machine has a codesigning certificate the script re-signs with the first
+one `security find-identity` lists — set `SIGN_IDENTITY` to choose another; the
+script prints the one it used. With no certificate at all it leaves the ad-hoc
+signature in place and says so.
+
+> Either way there's no Developer ID and no notarization on this project, so
+> Gatekeeper blocks the result on any Mac other than the one that built it. On
+> another machine, right-click the app → Open, or run
+> `xattr -dr com.apple.quarantine /Applications/ClaudeCodeUsageWidget.app`.
+> For real distribution, set `DEVELOPMENT_TEAM`, sign with a Developer ID, and
+> notarize with `notarytool`.
+>
+> Signing with a certificate is worth it even locally: an ad-hoc signature is
+> pinned to the binary's cdhash, so every rebuild looks like a new app to the
+> Keychain and macOS re-prompts for credential access.
 
 ## Configuration
 
-### Getting Your API Key
+There is none. The app reads the OAuth tokens Claude Code stores in your login
+Keychain, so the accounts `claude` is signed into are the accounts you see.
 
-1. Go to [Anthropic Console](https://console.anthropic.com)
-2. Sign in or create an account
-3. Navigate to API Keys section
-4. Create a new API key
-5. Copy the key and paste it into the widget settings
+Claude Code keys its credentials by config directory, and the app follows: each
+`CLAUDE_CONFIG_DIR` you have logged in gets its own Keychain slot, its own
+column in the popover, and its own line in the menu bar. The only setting is
+which profile the menu bar leads with — **Settings → Menu Bar → Show account**,
+or right-click the menu bar item and pick one under **Menu bar shows**. The
+choice is remembered across relaunches.
 
 ### Customizing Update Interval
 
@@ -92,36 +95,38 @@ By default, the app checks usage every 5 minutes. To change this:
 
 ## Usage Indicators
 
-The menu bar icon changes color based on your usage:
+Every number the app shows is **remaining** headroom, not consumption. The dot
+changes colour with the 5-hour window's remaining percentage:
 
-- **● Green** (0-24%): Plenty of requests remaining
-- **● Yellow** (25-49%): About half used
-- **● Orange** (50-74%): Getting close to limit
-- **● Red** (75-89%): Nearly at limit
-- **⚠️ Critical** (90-100%): At or near limit
+- **🟢 Green** (more than 50% left)
+- **🟡 Yellow** (20–50% left)
+- **🔴 Red** (20% or less left)
 
 ## How It Works
 
-1. **Status Bar Item**: Creates a menu bar item showing current usage percentage
-2. **Background Monitoring**: Polls the Claude API every 5 minutes
-3. **Data Parsing**: Processes API response and calculates usage percentage
-4. **Visual Update**: Updates menu bar icon and popover with latest data
-5. **Secure Storage**: API key stored securely in UserDefaults (consider Keychain for production)
+1. **Status Bar Item**: One line per profile — remaining 5-hour, then weekly, then Fable's weekly cap on Max plans
+2. **Background Monitoring**: Polls the usage endpoint every 5 minutes; opening the popover refreshes anything older than 30 seconds
+3. **Auth**: Re-reads Claude Code's OAuth token from the login Keychain on every poll, so a CLI-side refresh is picked up automatically. If the token has expired, the app runs the refresh grant itself and writes the rotated token back to the same Keychain item
+4. **Visual Update**: Updates the menu bar title, its tooltip, and the popover
+5. **Stale Readings**: A profile that can't be polled keeps its last good numbers on screen, labelled with the reason and the command that fixes it, instead of blanking
 
 ## API Integration
 
-The app connects to the Anthropic API to fetch usage data. The current implementation uses:
-
 ```
-Endpoint: https://api.anthropic.com/v1/usage
-Method: GET
-Headers:
-  - x-api-key: YOUR_API_KEY
-  - Content-Type: application/json
-  - anthropic-version: 2023-06-01
+GET https://api.anthropic.com/api/oauth/usage
+Authorization: Bearer <Claude Code OAuth access token>
+anthropic-beta: oauth-2025-04-20
 ```
 
-**Note**: The actual Claude Code API endpoint may differ. Update the URL in `UsageMonitor.swift` if needed.
+Returns `five_hour` / `seven_day` utilization percentages plus a `limits` array
+carrying per-model weekly caps. The plan name and email come from
+`GET /api/oauth/profile`. An expired access token is renewed with
+`POST /v1/oauth/token` (`grant_type=refresh_token`) before either call.
+
+> **Note**: these endpoints are undocumented — they're what Claude Code itself
+> calls — and may change without notice. Parsing is deliberately lenient so a
+> changed field degrades one row rather than breaking the app. See
+> [STATUS.md](STATUS.md) for the full response shape.
 
 ## Development
 
@@ -130,9 +135,9 @@ Headers:
 ```
 ClaudeCodeUsageWidget/
 ├── ClaudeCodeUsageWidget/
-│   ├── ClaudeCodeUsageApp.swift    # Main app and status bar setup
-│   ├── UsageMonitor.swift          # API integration and data fetching
-│   ├── UsageView.swift             # SwiftUI popover interface
+│   ├── ClaudeCodeUsageApp.swift    # App lifecycle, status bar, SwiftUI views
+│   ├── UsageMonitor.swift          # Usage/profile endpoints, polling, parsing
+│   ├── KeychainHelper.swift        # Reads Claude Code's OAuth token
 │   └── Info.plist                  # App configuration
 ├── ClaudeCodeUsageWidget.xcodeproj/
 └── README.md
@@ -142,21 +147,18 @@ ClaudeCodeUsageWidget/
 
 **ClaudeCodeUsageApp.swift**
 - App entry point and lifecycle management
-- Status bar item creation
-- Popover management
-- Usage percentage display logic
+- Status bar item (one stacked line per profile), tooltip and right-click menu
+- SwiftUI views: circular 5-hour gauge, weekly/scoped bars, per-profile columns, settings
 
 **UsageMonitor.swift**
-- API communication
-- Usage data model
-- Background polling
-- Error handling
+- Usage and profile endpoint calls, one set per discovered profile
+- Data model and lenient JSON parsing
+- Background polling, last-good snapshots and error states
 
-**UsageView.swift**
-- SwiftUI interface for popover
-- Circular progress indicator
-- Settings panel
-- Usage statistics display
+**KeychainHelper.swift**
+- Discovers every Claude Code profile from the Keychain's service names
+- Reads each profile's OAuth token from the login Keychain
+- Runs the OAuth refresh grant and writes the rotated token back
 
 ### Building for Distribution
 
@@ -169,22 +171,39 @@ ClaudeCodeUsageWidget/
    - Staple the notarization ticket
 
 3. **Create DMG**
-   - Use `create-dmg` or similar tool
+   - `./scripts/make-dmg.sh` (uses `hdiutil`; no external tooling)
    - Include installation instructions
 
 ## Troubleshooting
 
-### "API key not set" error
-- Make sure you've entered your API key in settings
-- Verify the API key is correct (check Anthropic Console)
+### "No Claude Code login found"
+- Run `claude login` in a terminal, then hit Refresh
+- If macOS asked about Keychain access and you clicked Deny, grant it again in
+  Keychain Access → `Claude Code-credentials` → Access Control (a non-default
+  profile lives under `Claude Code-credentials-<8 hex>`)
+
+### "Session expired and could not be renewed" / 401
+- The app renews expired access tokens on its own, so this means the refresh
+  token has lapsed too (~2 weeks) or the grant was refused
+- Run the command the popover shows for that profile — `claude login`, or
+  `CLAUDE_CONFIG_DIR=… claude` for a non-default one
+- Until then the profile keeps showing its last good numbers, marked stale
+
+### "Session renewed but the new token could not be saved"
+- The refresh succeeded but the rotated token couldn't be written back to the
+  Keychain, which would leave the CLI holding a retired token — so the app
+  refuses to use it
+- Check the app's access to that Keychain item, then run `claude login`
 
 ### No data showing
 - Check your internet connection
-- Verify the API endpoint is correct
-- Check if your API key has the necessary permissions
+- Confirm `curl https://api.anthropic.com/api/oauth/usage -H "Authorization: Bearer $TOKEN" -H "anthropic-beta: oauth-2025-04-20"` returns 200
 
 ### Widget not appearing in menu bar
-- Make sure `LSUIElement` is set to `true` in Info.plist
+- Make sure `LSUIElement` is set to `true` in `ClaudeCodeUsageWidget/Info.plist`.
+  The target sets `GENERATE_INFOPLIST_FILE = NO` and points `INFOPLIST_FILE` at
+  that file, so the plist wins — the `INFOPLIST_KEY_LSUIElement` build setting
+  is not consulted
 - Restart the app
 
 ### High CPU usage
@@ -195,7 +214,6 @@ ClaudeCodeUsageWidget/
 
 - [ ] Menu bar icon color customization
 - [ ] Widget for macOS Dashboard
-- [ ] Support for multiple API keys/accounts
 - [ ] Siri Shortcuts integration
 - [ ] iCloud sync for settings
 - [ ] Advanced analytics and predictions
@@ -232,7 +250,9 @@ If you encounter any issues or have questions:
 ## Privacy
 
 This app:
-- Only stores your API key locally on your Mac
+- Stores no credentials of its own — it reads the tokens Claude Code already
+  keeps in your login Keychain, and a token it renews is written straight back
+  to the same Keychain item
 - Communicates directly with Anthropic's API
 - Does not collect or transmit any other data
 - Does not include analytics or tracking
