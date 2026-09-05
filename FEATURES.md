@@ -160,7 +160,7 @@ Need help? Check:
 - [README.md](README.md) - Full documentation
 - [QUICKSTART.md](QUICKSTART.md) - 5-minute setup
 - [STATUS.md](STATUS.md) - Endpoints, Keychain lookup and refresh flow
-- [GitHub Issues](https://github.com/yourusername/claude-code-usage-widget/issues) - Report bugs
+- [GitHub Issues](https://github.com/Eden-Sun/ClaudeCodeUsageWidget/issues) - Report bugs
 
 ---
 

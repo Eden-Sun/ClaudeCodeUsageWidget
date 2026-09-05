@@ -54,10 +54,14 @@ Profiles are rediscovered every poll (attributes only), so a login or logout
 shows up without a restart. There is no API key, no organization ID, and no
 session cookie.
 
-The app is signed with a real certificate rather than ad-hoc (`CODE_SIGN_IDENTITY`
-in the project, overridable with `WIDGET_SIGN_IDENTITY`). An ad-hoc signature's
-designated requirement is the binary's cdhash, so every rebuild looked like a
-brand-new app to the Keychain and "Always Allow" never survived one.
+Signing identity comes from `Signing.xcconfig`, which defaults to ad-hoc so a
+fresh clone builds anywhere, and optionally includes a gitignored
+`Local.xcconfig` to override it per machine. Overriding it locally matters more
+than it looks: an ad-hoc signature's designated requirement is the binary's
+cdhash, so every rebuild looks like a brand-new app to the Keychain and "Always
+Allow" never survives one. The include sits *after* the defaults in that file —
+last assignment wins in an xcconfig, so an include above them gets overwritten
+by the very lines it is meant to override.
 
 ### Response shape
 

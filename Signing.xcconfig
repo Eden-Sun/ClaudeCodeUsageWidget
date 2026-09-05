@@ -1,0 +1,36 @@
+// Code signing identity for the app target.
+//
+// The default is "-" (ad-hoc), so a fresh clone builds on any Mac with no
+// Apple developer account and nothing to configure.
+//
+// Ad-hoc has one real cost, and it is worth knowing before you ignore it: an
+// ad-hoc signature's designated requirement is the binary's cdhash, so every
+// rebuild looks like a brand-new application to the Keychain. The app reads the
+// Claude Code OAuth token out of the login Keychain, and macOS re-prompts for
+// access after every single rebuild — "Always Allow" never sticks, because
+// what you allowed was the previous build.
+//
+// Signing with a certificate makes the requirement identity + certificate
+// based, which is stable across rebuilds, so the grant survives. To do that,
+// create Local.xcconfig next to this file (it is gitignored) containing:
+//
+//     WIDGET_SIGN_IDENTITY = <SHA-1 or name from `security find-identity -v -p codesigning`>
+//     WIDGET_DEVELOPMENT_TEAM = <your 10-character team ID>
+//
+// An Apple Development certificate from a free Apple ID is enough; this is
+// about a stable local signature, not distribution.
+//
+// scripts/make-dmg.sh takes a different route to the same place: it re-signs
+// the built app with whatever identity `security find-identity` reports, so a
+// DMG build gets a stable signature without any file here.
+
+WIDGET_SIGN_IDENTITY = -
+WIDGET_DEVELOPMENT_TEAM =
+
+// After the defaults, never before: in an xcconfig the last assignment wins, so
+// an include placed above would be overwritten by the two lines it is meant to
+// override. The "?" makes a missing file fine rather than a build error.
+#include? "Local.xcconfig"
+
+CODE_SIGN_IDENTITY = $(WIDGET_SIGN_IDENTITY)
+DEVELOPMENT_TEAM = $(WIDGET_DEVELOPMENT_TEAM)

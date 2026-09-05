@@ -118,7 +118,7 @@ rebuild. There is no setting for this in the UI.
 
 - Check the full [README.md](README.md)
 - [STATUS.md](STATUS.md) documents the endpoints and the Keychain lookup
-- Open an [issue](https://github.com/yourusername/claude-code-usage-widget/issues)
+- Open an [issue](https://github.com/Eden-Sun/ClaudeCodeUsageWidget/issues)
 
 ---
 

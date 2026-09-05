@@ -99,3 +99,12 @@ iOSInjectionProject/
 config.plist
 secrets.plist
 .DS_Store
+
+# Per-machine code signing identity (see Signing.xcconfig).
+# Holds a certificate fingerprint and team ID, which are specific to whoever
+# built here and would break the build for anyone else.
+Local.xcconfig
+
+# Build/distribution output
+build/
+dist/

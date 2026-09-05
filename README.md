@@ -1,116 +1,117 @@
-# Claude Code Usage Widget for macOS
+# Claude Code Usage Widget
 
-A native macOS menu bar app that shows how much of your Claude subscription
-limits you have **left** — the 5-hour session window and the weekly caps — in
-real time. Built with Swift and SwiftUI.
+A macOS menu bar app that shows how much of your Claude subscription you have
+**left** — the 5-hour session window, the weekly cap, and the per-model weekly
+caps the top-level numbers hide.
 
-## Features
+It reuses the login Claude Code already has. No API key, no organization ID, no
+cookie, nothing to configure.
 
-- **Menu Bar Integration**: Remaining 5-hour headroom, followed by the weekly figure whenever the response carries one (and, on Max plans, Fable's weekly cap)
-- **Both Windows**: 5-hour session window and the weekly cap, each with its reset time
-- **Per-Model Caps**: Surfaces the scoped weekly limits (e.g. Fable, Opus) that the top-level numbers hide
-- **Multiple Profiles**: Every `CLAUDE_CONFIG_DIR` Claude Code has logged in gets its own column in the popover and its own line in the menu bar; pick which one the menu bar leads with
-- **Zero Configuration**: Reuses the login Claude Code already has — no API key, no org ID, no cookie
-- **Auto Refresh**: Polls every 5 minutes, and renews an expired OAuth token itself rather than waiting for the CLI
-- **Colour Coding**: Green above 50% left, yellow 20–50% left, red below 20%
-- **Low Resource Usage**: Native Swift app with a minimal footprint
+```
+eddie | 5h:75% (rst 2h 41m) | 7d:59% (rst 4d 2h) | Fable:70%
+```
 
 ## Requirements
 
-- macOS 13.0 (Ventura) or later
-- Xcode 15.0 or later (for building)
-- Claude Code installed and signed in (`claude login`) on a Pro or Max plan
+- macOS 13 (Ventura) or later
+- Claude Code installed and signed in (`claude login`), on a Pro or Max plan
+- Xcode 15 or later, to build
 
-## Installation
-
-### Option 1: Build from Source
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/yourusername/claude-code-usage-widget.git
-   cd claude-code-usage-widget
-   ```
-
-2. **Open in Xcode**
-   ```bash
-   open ClaudeCodeUsageWidget.xcodeproj
-   ```
-
-3. **Build and Run**
-   - Select your Mac as the build target
-   - Press `Cmd + R` to build and run
-   - Or go to `Product > Run`
-
-4. **Allow Keychain access**
-   - On first launch macOS asks whether the app may read the
-     `Claude Code-credentials` Keychain item
-   - Click **Always Allow** — this is the login token the app reads to
-     authenticate; there is nothing else to configure
-
-### Option 2: Build a DMG
+## Install
 
 ```bash
-./scripts/make-dmg.sh     # -> dist/ClaudeCodeUsageWidget-<version>.dmg
+git clone https://github.com/Eden-Sun/ClaudeCodeUsageWidget.git
+cd ClaudeCodeUsageWidget
+./scripts/make-dmg.sh          # -> dist/ClaudeCodeUsageWidget-<version>.dmg
 ```
 
-Builds Release, stages the app next to an `/Applications` symlink, and produces
-a compressed disk image. No external tooling required.
+Open the DMG, drag the app to Applications, launch it. Or open
+`ClaudeCodeUsageWidget.xcodeproj` in Xcode and press ⌘R.
 
-If the machine has a codesigning certificate the script re-signs with the first
-one `security find-identity` lists — set `SIGN_IDENTITY` to choose another; the
-script prints the one it used. With no certificate at all it leaves the ad-hoc
-signature in place and says so.
+On first launch macOS asks whether the app may read the
+`Claude Code-credentials` Keychain item. Click **Always Allow** — that item
+holds the OAuth token the app authenticates with, and there is nothing else to
+grant.
 
-> Either way there's no Developer ID and no notarization on this project, so
-> Gatekeeper blocks the result on any Mac other than the one that built it. On
-> another machine, right-click the app → Open, or run
-> `xattr -dr com.apple.quarantine /Applications/ClaudeCodeUsageWidget.app`.
-> For real distribution, set `DEVELOPMENT_TEAM`, sign with a Developer ID, and
-> notarize with `notarytool`.
->
-> Signing with a certificate is worth it even locally: an ad-hoc signature is
-> pinned to the binary's cdhash, so every rebuild looks like a new app to the
-> Keychain and macOS re-prompts for credential access.
+There is no Developer ID and no notarization here, so Gatekeeper blocks the
+build on any Mac other than the one that produced it. Elsewhere: right-click the
+app → Open, or `xattr -dr com.apple.quarantine /Applications/ClaudeCodeUsageWidget.app`.
 
-## Configuration
+## Code signing, and why you should care locally
 
-There is none. The app reads the OAuth tokens Claude Code stores in your login
-Keychain, so the accounts `claude` is signed into are the accounts you see.
+A fresh clone builds ad-hoc signed, so it works on any Mac with no Apple
+developer account. That default has one cost worth understanding.
 
-Claude Code keys its credentials by config directory, and the app follows: each
-`CLAUDE_CONFIG_DIR` you have logged in gets its own Keychain slot, its own
-column in the popover, and its own line in the menu bar. The only setting is
-which profile the menu bar leads with — **Settings → Menu Bar → Show account**,
-or right-click the menu bar item and pick one under **Menu bar shows**. The
-choice is remembered across relaunches.
+An ad-hoc signature's designated requirement is the binary's cdhash. Change one
+byte of code and the signature identifies a different program — so to the
+Keychain, **every rebuild is a brand-new app that has never been granted
+anything**. "Always Allow" is not ignored; it was granted to the previous build.
+The result is a password prompt after every single rebuild, forever.
 
-### Customizing Update Interval
+Signing with a certificate makes the requirement identity + certificate based,
+which is stable across rebuilds, so the grant sticks. An Apple Development
+certificate from a free Apple ID is enough — this is about a stable local
+signature, not distribution.
 
-By default, the app checks usage every 5 minutes. To change this:
+Create `Local.xcconfig` next to `Signing.xcconfig` (it is gitignored):
 
-1. Open `UsageMonitor.swift`
-2. Find the line: `private let updateInterval: TimeInterval = 300`
-3. Change `300` to your desired interval in seconds
-4. Rebuild the app
+```
+WIDGET_SIGN_IDENTITY = <SHA-1 or name from `security find-identity -v -p codesigning`>
+WIDGET_DEVELOPMENT_TEAM = <your 10-character team ID>
+```
 
-## Usage Indicators
+`scripts/make-dmg.sh` gets there by another route: it re-signs the built app
+with whatever identity `security find-identity` reports, so a DMG build has a
+stable signature without any file here. Set `SIGN_IDENTITY` to choose among
+several; the script prints the one it used.
 
-Every number the app shows is **remaining** headroom, not consumption. The dot
-changes colour with the 5-hour window's remaining percentage:
+## Multiple profiles
 
-- **🟢 Green** (more than 50% left)
-- **🟡 Yellow** (20–50% left)
-- **🔴 Red** (20% or less left)
+Claude Code keys its credentials by config directory, and the app follows.
+Every `CLAUDE_CONFIG_DIR` you have logged in gets its own Keychain slot, its own
+column in the popover, and its own line in the menu bar.
 
-## How It Works
+Profiles are rediscovered on every poll, so a login or logout shows up without a
+restart. The only setting is which profile the menu bar leads with — **Settings
+→ Show account**, or right-click the menu bar item and pick one under **Menu bar
+shows**. It is remembered across relaunches.
 
-1. **Status Bar Item**: One line per profile — remaining 5-hour, then weekly, then Fable's weekly cap on Max plans
-2. **Background Monitoring**: Polls the usage endpoint every 5 minutes; opening the popover refreshes anything older than 30 seconds
-3. **Auth**: Re-reads Claude Code's OAuth token from the login Keychain on every poll, so a CLI-side refresh is picked up automatically. If the token has expired, the app runs the refresh grant itself and writes the rotated token back to the same Keychain item
-4. **Visual Update**: Updates the menu bar title, its tooltip, and the popover
-5. **Stale Readings**: A profile that can't be polled keeps its last good numbers on screen, labelled with the reason and the command that fixes it, instead of blanking
+## How it works
 
-## API Integration
+**Auth.** Claude Code stores an OAuth token in the login Keychain under service
+`Claude Code-credentials` (the default `~/.claude`), or
+`Claude Code-credentials-<first 8 hex of sha256(config dir)>` for any other
+`CLAUDE_CONFIG_DIR`. The app discovers profiles by reading Keychain *attributes*
+only, which never raises an access prompt, and reads the secret payload only
+when it actually needs a token.
+
+**Credential cache.** A token blob is held in memory until it is within a minute
+of expiring, then re-read from the Keychain. Reading the payload is what raises
+the "wants to use your confidential information" dialog, and the app polls every
+5 minutes — so an uncached read meant that dialog every 5 minutes on any build
+whose signature isn't in the item's ACL. A 401 drops the cached blob, so a token
+revoked or rotated out by a `claude login` elsewhere is re-read rather than
+re-sent until its recorded expiry.
+
+**Refresh.** The CLI only renews a token while it is running, so a profile left
+idle sits on an expired token indefinitely. The app runs the refresh grant
+itself and writes the rotated token back to the same Keychain item. If that
+write fails, it says so and stops rather than using the token — the exchange has
+already retired the one the CLI holds, and only `claude login` recovers from
+there.
+
+**Polling.** Every 5 minutes; opening the popover refreshes anything older than
+30 seconds. Change `updateInterval` in `UsageMonitor.swift` to adjust.
+
+**Degraded readings.** A profile that can't be polled keeps its last good
+numbers on screen, marked stale and labelled with the command that fixes it,
+instead of blanking. The usage windows move slowly enough that an hour-old
+reading still tells you where you stand.
+
+**Colour.** Tracks the 5-hour window's remaining percentage: green above 50%,
+yellow 20–50%, red at or below 20%.
+
+## API
 
 ```
 GET https://api.anthropic.com/api/oauth/usage
@@ -118,145 +119,66 @@ Authorization: Bearer <Claude Code OAuth access token>
 anthropic-beta: oauth-2025-04-20
 ```
 
-Returns `five_hour` / `seven_day` utilization percentages plus a `limits` array
-carrying per-model weekly caps. The plan name and email come from
-`GET /api/oauth/profile`. An expired access token is renewed with
-`POST /v1/oauth/token` (`grant_type=refresh_token`) before either call.
+Returns `five_hour` / `seven_day` utilization plus a `limits` array carrying
+per-model weekly caps. Plan name and email come from `GET /api/oauth/profile`.
+An expired token is renewed with `POST /v1/oauth/token`
+(`grant_type=refresh_token`).
 
-> **Note**: these endpoints are undocumented — they're what Claude Code itself
-> calls — and may change without notice. Parsing is deliberately lenient so a
-> changed field degrades one row rather than breaking the app. See
-> [STATUS.md](STATUS.md) for the full response shape.
-
-## Development
-
-### Project Structure
-
-```
-ClaudeCodeUsageWidget/
-├── ClaudeCodeUsageWidget/
-│   ├── ClaudeCodeUsageApp.swift    # App lifecycle, status bar, SwiftUI views
-│   ├── UsageMonitor.swift          # Usage/profile endpoints, polling, parsing
-│   ├── KeychainHelper.swift        # Reads Claude Code's OAuth token
-│   └── Info.plist                  # App configuration
-├── ClaudeCodeUsageWidget.xcodeproj/
-└── README.md
-```
-
-### Key Components
-
-**ClaudeCodeUsageApp.swift**
-- App entry point and lifecycle management
-- Status bar item (one stacked line per profile), tooltip and right-click menu
-- SwiftUI views: circular 5-hour gauge, weekly/scoped bars, per-profile columns, settings
-
-**UsageMonitor.swift**
-- Usage and profile endpoint calls, one set per discovered profile
-- Data model and lenient JSON parsing
-- Background polling, last-good snapshots and error states
-
-**KeychainHelper.swift**
-- Discovers every Claude Code profile from the Keychain's service names
-- Reads each profile's OAuth token from the login Keychain
-- Runs the OAuth refresh grant and writes the rotated token back
-
-### Building for Distribution
-
-1. **Archive the app**
-   - In Xcode: `Product > Archive`
-   
-2. **Notarize (for distribution outside App Store)**
-   - Sign with your Developer ID
-   - Submit for notarization
-   - Staple the notarization ticket
-
-3. **Create DMG**
-   - `./scripts/make-dmg.sh` (uses `hdiutil`; no external tooling)
-   - Include installation instructions
+These endpoints are undocumented — they are what Claude Code itself calls — and
+may change without notice. Parsing is deliberately lenient, so a changed field
+degrades one row rather than breaking the app. Full response shape in
+[STATUS.md](STATUS.md).
 
 ## Troubleshooting
 
-### "No Claude Code login found"
-- Run `claude login` in a terminal, then hit Refresh
-- If macOS asked about Keychain access and you clicked Deny, grant it again in
-  Keychain Access → `Claude Code-credentials` → Access Control (a non-default
-  profile lives under `Claude Code-credentials-<8 hex>`)
+**macOS keeps asking for the Keychain password.** Almost always an ad-hoc build:
+see [Code signing](#code-signing-and-why-you-should-care-locally) above. If the
+dialog names `security` rather than `ClaudeCodeUsageWidget`, it isn't this app —
+something else on your machine is shelling out to `security` to read the same
+item, a statusline script being the usual culprit.
 
-### "Session expired and could not be renewed" / 401
-- The app renews expired access tokens on its own, so this means the refresh
-  token has lapsed too (~2 weeks) or the grant was refused
-- Run the command the popover shows for that profile — `claude login`, or
-  `CLAUDE_CONFIG_DIR=… claude` for a non-default one
-- Until then the profile keeps showing its last good numbers, marked stale
+**"No Claude Code login found."** Run `claude login`, then hit Refresh. If you
+clicked Deny on the Keychain prompt, grant it again in Keychain Access →
+`Claude Code-credentials` → Access Control (a non-default profile is under
+`Claude Code-credentials-<8 hex>`).
 
-### "Session renewed but the new token could not be saved"
-- The refresh succeeded but the rotated token couldn't be written back to the
-  Keychain, which would leave the CLI holding a retired token — so the app
-  refuses to use it
-- Check the app's access to that Keychain item, then run `claude login`
+**"Session expired and could not be renewed" / 401.** The app renews expired
+access tokens on its own, so this means the refresh token has lapsed too
+(~2 weeks) or the grant was refused. Run the command the popover shows for that
+profile.
 
-### No data showing
-- Check your internet connection
-- Confirm `curl https://api.anthropic.com/api/oauth/usage -H "Authorization: Bearer $TOKEN" -H "anthropic-beta: oauth-2025-04-20"` returns 200
+**"Session renewed but the new token could not be saved."** The refresh
+succeeded but the rotated token couldn't be written back, which would leave the
+CLI holding a retired token — so the app refuses to use it. Check the app's
+access to that Keychain item, then run `claude login`.
 
-### Widget not appearing in menu bar
-- Make sure `LSUIElement` is set to `true` in `ClaudeCodeUsageWidget/Info.plist`.
-  The target sets `GENERATE_INFOPLIST_FILE = NO` and points `INFOPLIST_FILE` at
-  that file, so the plist wins — the `INFOPLIST_KEY_LSUIElement` build setting
-  is not consulted
-- Restart the app
+**Nothing in the menu bar.** `LSUIElement` must be `true` in
+`ClaudeCodeUsageWidget/Info.plist`. The target sets `GENERATE_INFOPLIST_FILE = NO`
+and points `INFOPLIST_FILE` at that file, so the plist wins — the
+`INFOPLIST_KEY_LSUIElement` build setting is not consulted.
 
-### High CPU usage
-- Increase the `updateInterval` to poll less frequently
-- Check for network issues causing repeated failed requests
+## Project layout
 
-## Future Enhancements
-
-- [ ] Menu bar icon color customization
-- [ ] Widget for macOS Dashboard
-- [ ] Siri Shortcuts integration
-- [ ] iCloud sync for settings
-- [ ] Advanced analytics and predictions
-- [ ] Team usage tracking
-- [ ] Custom notification sounds
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgments
-
-- Built with Swift and AppKit
-- Uses Anthropic Claude API
-- Inspired by the need for easy usage monitoring
-
-## Support
-
-If you encounter any issues or have questions:
-- Open an [Issue](https://github.com/yourusername/claude-code-usage-widget/issues)
-- Check existing issues for solutions
-- Consult the [Anthropic API Documentation](https://docs.anthropic.com)
+```
+ClaudeCodeUsageWidget/
+├── ClaudeCodeUsageApp.swift   # Lifecycle, status bar item, SwiftUI views
+├── UsageMonitor.swift         # Endpoints, polling, parsing, degraded state
+└── KeychainHelper.swift       # Profile discovery, token read/cache/refresh
+Signing.xcconfig               # Code signing identity (Local.xcconfig overrides)
+scripts/make-dmg.sh            # Release build -> signed .app -> .dmg
+```
 
 ## Privacy
 
-This app:
-- Stores no credentials of its own — it reads the tokens Claude Code already
-  keeps in your login Keychain, and a token it renews is written straight back
-  to the same Keychain item
-- Communicates directly with Anthropic's API
-- Does not collect or transmit any other data
-- Does not include analytics or tracking
+The app stores no credentials of its own. It reads the tokens Claude Code
+already keeps in your login Keychain, and a token it renews goes straight back
+to the same Keychain item. It talks to Anthropic's API and nothing else — no
+analytics, no tracking, no other data leaves the machine.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
 
 ---
 
-**Note**: This is an unofficial app and is not affiliated with Anthropic. Use at your own discretion.
+Unofficial, and not affiliated with Anthropic.
