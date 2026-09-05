@@ -87,7 +87,8 @@ class KeychainHelper {
 
     /// Guards `cache`.
     private let cacheLock = NSLock()
-    /// The last blob read out of each slot, keyed by service.
+    /// The last blob read out of each slot, with the item's modification date at
+    /// the time it was read, keyed by service.
     ///
     /// This exists for the *prompt*, not for speed. Reading the payload is what
     /// raises "wants to use your confidential information", and the app polls
@@ -95,7 +96,13 @@ class KeychainHelper {
     /// any ad-hoc signed build, since its designated requirement is the binary's
     /// cdhash — an uncached read means that dialog every five minutes, forever.
     /// Holding the blob in memory turns that into at most one prompt per launch.
-    private var cache: [String: ClaudeCodeCredentials] = [:]
+    ///
+    /// The modification date is what keeps that from going stale. Expiry alone
+    /// is not enough: `claude login` swaps the *identity* in a slot without
+    /// touching when the token expires, and the token it replaces usually stays
+    /// valid, so nothing 401s and nothing else would notice. The app would keep
+    /// reporting the previous account for hours.
+    private var cache: [String: (credentials: ClaudeCodeCredentials, modified: Date?)] = [:]
 
     /// How long before a cached access token's expiry it stops being served.
     /// The margin covers the round trip that's about to use it.
@@ -237,21 +244,58 @@ class KeychainHelper {
     /// expiry is never cached at all (see `remember`), so this can't pin one
     /// forever.
     private func cachedCredentials(for service: String) -> ClaudeCodeCredentials? {
+        // Outside the lock: this is a Keychain round trip, and it only reads
+        // attributes, so it never blocks on a prompt.
+        let modified = modificationDate(for: service)
+
         cacheLock.lock()
         defer { cacheLock.unlock() }
-        guard let cached = cache[service], let expiry = cached.expiresAt else { return nil }
+        guard let cached = cache[service], let expiry = cached.credentials.expiresAt else { return nil }
+
+        // The slot was rewritten since this blob was read — a login, a logout,
+        // or a refresh by the CLI. Whatever it was, what's cached is not what's
+        // stored any more.
+        guard cached.modified == modified else {
+            cache[service] = nil
+            return nil
+        }
         guard expiry.timeIntervalSinceNow > Self.cacheMargin else {
             cache[service] = nil
             return nil
         }
-        return cached
+        return cached.credentials
     }
 
     private func remember(_ credentials: ClaudeCodeCredentials, for service: String) {
         guard credentials.expiresAt != nil else { return }
+        // Read after the payload, so a write that lands between the two shows up
+        // as a mismatch on the next poll rather than being cached over.
+        let modified = modificationDate(for: service)
         cacheLock.lock()
-        cache[service] = credentials
+        cache[service] = (credentials, modified)
         cacheLock.unlock()
+    }
+
+    /// When the slot was last written, across every account stored under it.
+    ///
+    /// Attributes only, so this never raises an access prompt — which is what
+    /// makes it usable as a cheap freshness check on every poll. A slot with no
+    /// items returns nil, and nil never equals a real date, so a cache entry for
+    /// a slot that has since been deleted is discarded rather than served.
+    private func modificationDate(for service: String) -> Date? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll
+        ]
+
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let items = result as? [[String: Any]] else {
+            return nil
+        }
+        return items.compactMap { $0[kSecAttrModificationDate as String] as? Date }.max()
     }
 
     /// Drops one slot's cached blob so the next read goes back to the Keychain.

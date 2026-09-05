@@ -85,13 +85,19 @@ shows**. It is remembered across relaunches.
 only, which never raises an access prompt, and reads the secret payload only
 when it actually needs a token.
 
-**Credential cache.** A token blob is held in memory until it is within a minute
-of expiring, then re-read from the Keychain. Reading the payload is what raises
-the "wants to use your confidential information" dialog, and the app polls every
-5 minutes — so an uncached read meant that dialog every 5 minutes on any build
-whose signature isn't in the item's ACL. A 401 drops the cached blob, so a token
-revoked or rotated out by a `claude login` elsewhere is re-read rather than
-re-sent until its recorded expiry.
+**Credential cache.** A token blob is held in memory rather than re-read on
+every poll. Reading the payload is what raises the "wants to use your
+confidential information" dialog, and the app polls every 5 minutes — so an
+uncached read meant that dialog every 5 minutes on any build whose signature
+isn't in the item's ACL.
+
+Three things drop the cached blob, and the first is the one that is easy to get
+wrong. Every poll compares the Keychain item's **modification date**, which
+costs nothing because reading attributes never prompts. Expiry alone would not
+be enough: `claude login` swaps the identity in a slot without changing when the
+token expires, and the token it replaces usually stays valid, so nothing would
+401 and the app would keep reporting the previous account for hours. The other
+two are the ordinary ones — the token nearing expiry, and a 401.
 
 **Refresh.** The CLI only renews a token while it is running, so a profile left
 idle sits on an expired token indefinitely. The app runs the refresh grant

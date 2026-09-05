@@ -41,9 +41,13 @@ authorization instead of showing the "wants to use your confidential
 information" prompt — which left the app with no token at all after a rebuild
 changed its signature.
 
-The blob is then held in memory until its access token is within a minute of
-expiry, at which point the next poll reads the Keychain again — so a refresh
-performed by the CLI is still picked up without restarting the app. The cache is
+The blob is then held in memory, and re-read when any of three things says it is
+no longer what's stored: the item's modification date changed, the access token
+is within a minute of expiry, or a request came back 401. The modification date
+is the one that catches an account switch — `claude login` replaces the identity
+in a slot without moving the expiry, and the token it displaces usually stays
+valid, so neither of the other two would fire. Comparing it costs nothing, since
+reading attributes never prompts. The cache is
 about the *prompt*, not speed: reading the payload is what raises "wants to use
 your confidential information", and an uncached read on every 5-minute poll put
 that dialog up every 5 minutes on any build whose signature isn't in the item's
