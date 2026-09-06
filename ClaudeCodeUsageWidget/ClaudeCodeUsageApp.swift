@@ -227,18 +227,63 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         (button.cell as? NSButtonCell)?.usesSingleLineMode = false
         button.lineBreakMode = .byClipping
 
+        // Built at the fullest detail that fits, dropping the least urgent
+        // figures rather than letting the item run under the notch. macOS does
+        // not truncate a status item that no longer fits — it hides it — so an
+        // item that overruns disappears entirely, which is the worst outcome of
+        // the three.
+        let title: NSAttributedString
+        if let forced = Detail(rawValue: usageMonitor.menuBarDetail) {
+            title = menuBarTitle(detail: forced)
+        } else {
+            // Automatic: the fullest detail that fits the budget. macOS does not
+            // truncate a status item that no longer fits — it hides it — so an
+            // item that overruns disappears entirely, which is the worst of the
+            // three outcomes.
+            var candidate = menuBarTitle(detail: .full)
+            let budget = menuBarWidthBudget()
+            for detail in Detail.allCases.dropFirst() where candidate.size().width > budget {
+                candidate = menuBarTitle(detail: detail)
+            }
+            title = candidate
+        }
+
+        button.attributedTitle = title
+        // The tooltip always carries everything, whatever the title had room
+        // for — that is where a dropped figure goes, not away.
+        var tooltips = usageMonitor.orderedForDisplay.map(tooltip(for:))
+        if let grokTooltip = grokTooltip() { tooltips.append(grokTooltip) }
+        button.toolTip = tooltips.joined(separator: "\n\n")
+    }
+
+    /// The widest the status item may be.
+    ///
+    /// `auxiliaryTopRightArea` is the strip of menu bar to the right of the
+    /// notch — the region status items actually live in — and is nil on a
+    /// display without one, where the whole width is available. Half of it is
+    /// the budget: the other half has to hold everyone else's items, and this
+    /// app is not entitled to more than its share. The 420pt floor keeps a
+    /// narrow external display from squeezing the item to nothing.
+    private func menuBarWidthBudget() -> CGFloat {
+        guard let screen = NSScreen.main else { return 420 }
+        let available = screen.auxiliaryTopRightArea?.width ?? screen.frame.width
+        return max(220, min(available * 0.5, 420))
+    }
+
+    /// Lays the entries out as a grid at one detail level.
+    private func menuBarTitle(detail: Detail) -> NSAttributedString {
         // One entry per thing worth reporting: each Claude profile, then Grok.
-        // Built as a flat list first because how many *lines* they get is a
+        // Built as a flat list first because how many *rows* they get is a
         // separate decision from how many entries there are.
         let ordered = usageMonitor.orderedForDisplay
         var entries: [(text: String, color: NSColor, stale: Bool)] = ordered.map {
-            (values(for: $0), dotColor(for: $0), $0.isStale)
+            (values(for: $0, detail: detail), dotColor(for: $0), $0.isStale)
         }
-        if let grokLine = grokMenuBarLine() {
+        if let grokLine = grokMenuBarLine(detail: detail) {
             entries.append((grokLine, grokDotColor(),
                             grokMonitor.usage != nil && grokMonitor.error != nil))
         }
-        guard !entries.isEmpty else { return }
+        guard !entries.isEmpty else { return NSAttributedString() }
 
         // Two rows, filled top-to-bottom then left-to-right, so four entries
         // read as a grid:
@@ -323,25 +368,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         title.addAttributes([.paragraphStyle: paragraph, .baselineOffset: baseline],
                             range: NSRange(location: 0, length: title.length))
-
-        button.attributedTitle = title
-        var tooltips = ordered.map(tooltip(for:))
-        if let grokTooltip = grokTooltip() { tooltips.append(grokTooltip) }
-        button.toolTip = tooltips.joined(separator: "\n\n")
+        return title
     }
 
     /// The Grok row's text, or nil when there is no cookie on file — an
     /// unconfigured Grok must not cost a menu bar line, least of all on a
     /// notched Mac.
-    private func grokMenuBarLine() -> String? {
+    private func grokMenuBarLine(detail: Detail = .full) -> String? {
         // A Grok row is earned by having something to say. With no CLI on the
         // machine there is nothing to report, and a menu bar line costs width
         // that matters on a notched Mac.
         guard grokMonitor.isAvailable else { return nil }
+        // "G" once space is tight: the dot's colour and the popover carry the
+        // rest, and a truncated item is worse than a terse one.
+        let label = detail == .headline ? "G" : "Grok"
         guard let remaining = grokMonitor.usage?.displayRemaining else {
-            return "Grok " + UsageStyle.unknownValue
+            return label + " " + UsageStyle.unknownValue
         }
-        return "Grok " + UsageStyle.percentValue(remaining)
+        return label + " " + UsageStyle.percentValue(remaining)
     }
 
     private func grokDotColor() -> NSColor {
@@ -381,16 +425,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Remaining headroom: 5-hour, weekly, then Fable's weekly cap on Max.
     /// Always the same fields in the same order, so stacked rows line up.
-    private func values(for account: AccountUsage) -> String {
+    /// How much of each reading the menu bar has room for.
+    ///
+    /// Ordered by what gets dropped first. The 5-hour figure is the one that
+    /// bites soonest and is never dropped; the scoped cap is the most
+    /// specialised and goes first.
+    enum Detail: Int, CaseIterable, Comparable {
+        case full = 0       // 5-hour, weekly, scoped
+        case noScoped = 1   // 5-hour, weekly
+        case headline = 2   // 5-hour only
+
+        static func < (a: Detail, b: Detail) -> Bool { a.rawValue < b.rawValue }
+    }
+
+    private func values(for account: AccountUsage, detail: Detail) -> String {
         guard let usage = account.snapshot else { return UsageStyle.unknownValue }
 
         var values = [usage.headlineDisplayRemaining]
-        if let weekly = usage.sevenDay {
+        if detail <= .noScoped, let weekly = usage.sevenDay {
             values.append(weekly.displayRemaining)
         }
         // Fable has its own weekly cap, but only Max plans get one worth
         // watching — don't spend menu bar width on it for Pro.
-        if account.isMaxPlan == true, let fable = usage.fableLimit {
+        if detail == .full, account.isMaxPlan == true, let fable = usage.fableLimit {
             values.append(fable.displayRemaining)
         }
         return values.map(UsageStyle.percentValue).joined(separator: " ")
@@ -934,6 +991,21 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
+
+                Picker("Detail", selection: $usageMonitor.menuBarDetail) {
+                    Text("Automatic").tag(-1)
+                    Text("5-hour, weekly, per-model").tag(0)
+                    Text("5-hour, weekly").tag(1)
+                    Text("5-hour only").tag(2)
+                }
+                Text("""
+                    Automatic shows as much as fits. Narrow it by hand if the menu bar is \
+                    crowded — on a Mac with a notch, macOS hides items it cannot fit rather \
+                    than shrinking them, and this app cannot see how much room other apps' \
+                    items take. Whatever is dropped stays in the tooltip and the popover.
+                    """)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
 
             Section("Grok") {

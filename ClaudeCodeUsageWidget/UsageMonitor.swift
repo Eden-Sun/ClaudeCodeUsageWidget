@@ -161,7 +161,23 @@ class UsageMonitor: ObservableObject {
         }
     }
 
+    /// How much of each reading the menu bar shows. Persisted, and pushed
+    /// through the same update path as the primary profile so a change is
+    /// visible immediately rather than at the next poll.
+    ///
+    /// Automatic is right almost always; the override exists because the thing
+    /// that squeezes this item is *other* apps' status items, whose widths this
+    /// app cannot see. When the menu bar is crowded enough that macOS starts
+    /// hiding items under the notch, only the user can tell.
+    @Published var menuBarDetail: Int = UserDefaults.standard.object(forKey: menuBarDetailKey) as? Int ?? -1 {
+        didSet {
+            UserDefaults.standard.set(menuBarDetail, forKey: Self.menuBarDetailKey)
+            onUsageUpdate?()
+        }
+    }
+
     private static let primaryServiceKey = "primary_account_service"
+    private static let menuBarDetailKey = "menu_bar_detail"
 
     var primary: AccountUsage? {
         accounts.first { $0.account.service == primaryService } ?? accounts.first

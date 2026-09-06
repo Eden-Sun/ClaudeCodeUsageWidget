@@ -179,6 +179,19 @@ rather than reshuffling which row the existing ones sit on. Columns are aligned
 with tab stops, since the labels differ in width and padding spaces would leave
 the second column ragged.
 
+**Width, and the notch.** macOS does not truncate a status item that no longer
+fits — it hides it — so on a Mac with a notch a crowded menu bar makes items
+disappear rather than shrink. The app keeps itself inside a budget of half the
+menu bar's right-hand region (`auxiliaryTopRightArea`, the strip beside the
+notch), dropping the per-model cap first and then the weekly figure if it would
+overrun. Three profiles and Grok come to about 134pt against a 332pt budget on a
+14" MacBook Pro, so in practice it never has to.
+
+What the app cannot see is how much room *other* apps' items are taking, which
+is what actually squeezes it. **Settings → Menu Bar → Detail** is the manual
+lever: forcing "5-hour only" takes the same four entries down to about 84pt.
+Anything dropped stays in the tooltip and the popover.
+
 ## API
 
 ```
