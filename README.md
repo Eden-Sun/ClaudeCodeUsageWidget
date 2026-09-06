@@ -2,13 +2,15 @@
 
 A macOS menu bar app that shows how much of your Claude subscription you have
 **left** — the 5-hour session window, the weekly cap, and the per-model weekly
-caps the top-level numbers hide.
+caps the top-level numbers hide. It reads a Grok subscription's weekly usage
+too, when the Grok CLI is installed.
 
-It reuses the login Claude Code already has. No API key, no organization ID, no
+It reuses the logins the CLIs already have. No API key, no organization ID, no
 cookie, nothing to configure.
 
 ```
-eddie | 5h:75% (rst 2h 41m) | 7d:59% (rst 4d 2h) | Fable:70%
+● 84 59
+● --  ● Grok 86
 ```
 
 ## Requirements
@@ -76,6 +78,45 @@ restart. The only setting is which profile the menu bar leads with — **Setting
 → Show account**, or right-click the menu bar item and pick one under **Menu bar
 shows**. It is remembered across relaunches.
 
+## Grok
+
+If the [Grok CLI](https://grok.com) is installed and signed in, the menu bar
+gains a `Grok` figure: the percentage left in the current billing period, with
+its reset time in the tooltip. Nothing to configure — the CLI already holds the
+session, and the app finds it in the usual install locations (`~/.local/bin`,
+Homebrew). Settings → Grok takes an explicit path for an install elsewhere.
+
+The figure comes from the CLI, not from grok.com. That is not a shortcut, it is
+the only thing that works. grok.com sits behind Cloudflare, whose `cf_clearance`
+cookie is bound to the IP, the User-Agent **and** the TLS/JA3 fingerprint of the
+client that solved the challenge — the fingerprint is taken from the ClientHello,
+before a single header or cookie is sent. A native `URLSession` has its own
+fingerprint, so a cookie copied out of a browser is dead on first reuse, and a
+request whose TLS says "URLSession" while its User-Agent claims to be Chrome
+reads as more suspicious than one that never lied. No endpoint on that host is
+reachable this way; the wall is below HTTP, so switching paths changes nothing.
+
+The CLI, meanwhile, already holds a working OAuth session in `~/.grok/auth.json`
+and speaks [ACP](https://agentclientprotocol.com) over stdio. The app spawns
+`grok agent stdio`, sends the `initialize` handshake and the `_x.ai/billing`
+extension method, reads the reply and exits:
+
+```json
+{ "config": { "creditUsagePercent": 14.0,
+              "currentPeriod": { "type": "USAGE_PERIOD_TYPE_WEEKLY",
+                                 "start": "…", "end": "…" } },
+  "subscription_tier": "SuperGrok" }
+```
+
+No session is created, no model is called, and no quota is spent — the whole
+exchange takes about a second. (The CLI's own `/usage` command is a different
+thing: it reports one session's token counts via `_x.ai/session/usage`, not the
+subscription's quota.)
+
+Both of these are undocumented internals of someone else's CLI and may change
+without notice. When they do, the row degrades to `--` with the reason in the
+tooltip; nothing else is affected.
+
 ## How it works
 
 **Auth.** Claude Code stores an OAuth token in the login Keychain under service
@@ -116,6 +157,11 @@ reading still tells you where you stand.
 
 **Colour.** Tracks the 5-hour window's remaining percentage: green above 50%,
 yellow 20–50%, red at or below 20%.
+
+**Menu bar layout.** Two lines, maximum. The row is about 22pt tall and two
+10.5pt lines already fill it; a third would need roughly 7pt, which is past
+legible. So the first line carries the primary profile and any further entries —
+other profiles, Grok — share the second, each keeping its own status dot.
 
 ## API
 
@@ -158,6 +204,19 @@ succeeded but the rotated token couldn't be written back, which would leave the
 CLI holding a retired token — so the app refuses to use it. Check the app's
 access to that Keychain item, then run `claude login`.
 
+**The Grok row is missing or says `--`.** Run `grok login` in a terminal. If the
+CLI is installed somewhere unusual, set its path in Settings → Grok — the app
+does not consult `PATH`, because an app launched from Finder inherits launchd's
+environment rather than a shell's.
+
+**Settings won't open.** Fixed, but worth recording why: the settings window used
+to be a SwiftUI `Settings` scene opened with the private `showSettingsWindow:`
+selector. In an accessory app that never opens a window of its own, the scene is
+not reliably instantiated, and the selector reports success either way — so the
+failure was completely silent. The window is now built directly by the app
+delegate, and opening it is deferred past the status menu's tracking session,
+which otherwise swallows the request.
+
 **Nothing in the menu bar.** `LSUIElement` must be `true` in
 `ClaudeCodeUsageWidget/Info.plist`. The target sets `GENERATE_INFOPLIST_FILE = NO`
 and points `INFOPLIST_FILE` at that file, so the plist wins — the
@@ -169,7 +228,8 @@ and points `INFOPLIST_FILE` at that file, so the plist wins — the
 ClaudeCodeUsageWidget/
 ├── ClaudeCodeUsageApp.swift   # Lifecycle, status bar item, SwiftUI views
 ├── UsageMonitor.swift         # Endpoints, polling, parsing, degraded state
-└── KeychainHelper.swift       # Profile discovery, token read/cache/refresh
+├── KeychainHelper.swift       # Profile discovery, token read/cache/refresh
+└── GrokMonitor.swift          # Grok CLI over ACP, billing-period usage
 Signing.xcconfig               # Code signing identity (Local.xcconfig overrides)
 scripts/make-dmg.sh            # Release build -> signed .app -> .dmg
 ```

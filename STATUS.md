@@ -67,6 +67,41 @@ Allow" never survives one. The include sits *after* the defaults in that file �
 last assignment wins in an xcconfig, so an include above them gets overwritten
 by the very lines it is meant to override.
 
+## Grok usage
+
+Read from the Grok CLI over ACP, never from grok.com.
+
+```
+grok agent stdio
+  -> {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,…}}
+  -> {"jsonrpc":"2.0","id":2,"method":"_x.ai/billing","params":{}}
+  <- {"config":{"creditUsagePercent":14.0,
+                "currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","start":…,"end":…}},
+      "subscription_tier":"SuperGrok"}
+```
+
+Only the `initialize` handshake is required — no `session/new`, so nothing is
+written to `~/.grok/sessions`, no model is called, and no quota is spent. About
+a second end to end.
+
+grok.com itself is unreachable from a native app and always will be. Cloudflare
+binds `cf_clearance` to the IP, the User-Agent *and* the TLS/JA3 fingerprint,
+and the fingerprint is taken from the ClientHello — before any header, cookie or
+script. `URLSession` cannot produce a browser's fingerprint, so a copied cookie
+dies on first reuse; a mismatched pair (URLSession TLS, Chrome User-Agent) is a
+stronger bot signal than an honest one. Probed `/usage`, `/rest/usage`,
+`/api/usage` and `/rest/rate-limits` with a full browser User-Agent: all 403,
+all the interstitial. The wall is below HTTP, so no endpoint on that host is a
+way round it.
+
+The CLI's `/usage` command is a different thing — `_x.ai/session/usage`, which
+returns one session's token counts (`inputTokens`, `modelCalls`, `numTurns`),
+not the subscription quota.
+
+Both methods are undocumented internals of xAI's CLI. Parsing requires only
+`creditUsagePercent`, so a renamed period field costs the reset time rather than
+the row.
+
 ### Response shape
 
 ```json

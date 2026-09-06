@@ -10,12 +10,14 @@
 		A1B2C3D400000001 /* ClaudeCodeUsageApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000011 /* ClaudeCodeUsageApp.swift */; };
 		A1B2C3D400000002 /* UsageMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000012 /* UsageMonitor.swift */; };
 		A1B2C3D400000004 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000014 /* KeychainHelper.swift */; };
+		A1B2C3D400000005 /* GrokMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000015 /* GrokMonitor.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		A1B2C3D400000011 /* ClaudeCodeUsageApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeCodeUsageApp.swift; sourceTree = "<group>"; };
 		A1B2C3D400000012 /* UsageMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageMonitor.swift; sourceTree = "<group>"; };
 		A1B2C3D400000014 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
+		A1B2C3D400000015 /* GrokMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokMonitor.swift; sourceTree = "<group>"; };
 		A1B2C3D40000001B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A1B2C3D400000020 /* ClaudeCodeUsageWidget.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ClaudeCodeUsageWidget.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1B2C3D400000021 /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
@@ -47,6 +49,7 @@
 				A1B2C3D400000011 /* ClaudeCodeUsageApp.swift */,
 				A1B2C3D400000012 /* UsageMonitor.swift */,
 				A1B2C3D400000014 /* KeychainHelper.swift */,
+				A1B2C3D400000015 /* GrokMonitor.swift */,
 				A1B2C3D40000001B /* Info.plist */,
 			);
 			path = ClaudeCodeUsageWidget;
@@ -120,6 +123,7 @@
 				A1B2C3D400000001 /* ClaudeCodeUsageApp.swift in Sources */,
 				A1B2C3D400000002 /* UsageMonitor.swift in Sources */,
 				A1B2C3D400000004 /* KeychainHelper.swift in Sources */,
+				A1B2C3D400000005 /* GrokMonitor.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

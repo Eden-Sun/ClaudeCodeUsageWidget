@@ -1,22 +1,36 @@
 import SwiftUI
+import os.log
 
 @main
 struct ClaudeCodeUsageWidgetApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
+    /// Deliberately empty.
+    ///
+    /// The settings window used to live here as a `Settings` scene, opened with
+    /// the `showSettingsWindow:` selector. In this app that silently did
+    /// nothing: the scene is not reliably instantiated in an accessory
+    /// (`LSUIElement`) app that never opens a window of its own, and the
+    /// selector is private, so a miss reports success and leaves no trace. The
+    /// window is built by the delegate instead, where it can be held onto and
+    /// checked.
     var body: some Scene {
-        Settings {
-            SettingsView(usageMonitor: appDelegate.usageMonitor)
-        }
+        Settings { EmptyView() }
     }
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
     var popover: NSPopover?
+    /// Held so the window is reused rather than rebuilt, and so it survives
+    /// being closed — a window released on close would take the hosting
+    /// controller, and the settings state, with it.
+    private var settingsWindow: NSWindow?
+    private let logger = Logger(subsystem: "com.claudecode.usagewidget", category: "AppDelegate")
     /// Not @Published: SwiftUI would only observe the reference being replaced,
     /// never the monitor's own @Published mutations. Views observe it directly.
     let usageMonitor = UsageMonitor()
+    let grokMonitor = GrokMonitor()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
@@ -42,7 +56,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                                       height: PopoverContentView.height)
         popover?.behavior = .transient
         popover?.contentViewController = NSHostingController(
-            rootView: PopoverContentView(usageMonitor: usageMonitor, appDelegate: self)
+            rootView: PopoverContentView(usageMonitor: usageMonitor,
+                                         grokMonitor: grokMonitor,
+                                         appDelegate: self)
         )
     }
 
@@ -60,13 +76,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // Opening the popover is an explicit "show me now" — don't make
                 // the user stare at numbers up to 5 minutes old.
                 usageMonitor.refreshIfStale()
+                grokMonitor.refreshIfStale()
             }
         }
     }
 
     func showContextMenu() {
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Refresh", action: #selector(refresh), keyEquivalent: "r"))
+        // Every item targets self explicitly. A nil target sends the action up
+        // the responder chain, which happens to reach the app delegate — but
+        // only by way of NSApp, and only while nothing else has claimed first
+        // responder. Naming the target removes the coincidence.
+        menu.addItem(item(title: "Refresh", action: #selector(refresh), key: "r"))
 
         // Switching which profile drives the menu bar is a one-click job when
         // there is more than one to switch between.
@@ -92,13 +113,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Settings...", action: #selector(showSettings), keyEquivalent: ","))
+        menu.addItem(item(title: "Settings...", action: #selector(showSettings), key: ","))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
+        menu.addItem(item(title: "Quit", action: #selector(quit), key: "q"))
 
         statusItem?.menu = menu
         statusItem?.button?.performClick(nil)
         statusItem?.menu = nil
+    }
+
+    private func item(title: String, action: Selector, key: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        item.target = self
+        return item
     }
 
     @objc func selectPrimary(_ sender: NSMenuItem) {
@@ -108,16 +135,48 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func refresh() {
         usageMonitor.fetchUsage()
+        grokMonitor.fetch()
     }
 
     @objc func showSettings() {
         popover?.performClose(nil)
 
-        // Try multiple selectors for compatibility
-        if !NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) {
-            NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-        }
+        // Deferred because this runs *during* the status menu's tracking
+        // session, and a window ordered front in that state is dropped — the
+        // menu closes and nothing appears. The next runloop pass is after
+        // tracking has ended.
+        DispatchQueue.main.async { self.presentSettings() }
+    }
+
+    private func presentSettings() {
+        let window = settingsWindow ?? makeSettingsWindow()
+        settingsWindow = window
+
+        // Before ordering front, not after: an accessory app that isn't active
+        // can order a window front and still have it appear behind whatever the
+        // user was looking at.
         NSApp.activate(ignoringOtherApps: true)
+        if !window.isVisible { window.center() }
+        window.makeKeyAndOrderFront(nil)
+
+        logger.info("settings window visible=\(window.isVisible, privacy: .public) key=\(window.isKeyWindow, privacy: .public)")
+    }
+
+    private func makeSettingsWindow() -> NSWindow {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 560),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Settings"
+        window.contentViewController = NSHostingController(
+            rootView: SettingsView(usageMonitor: usageMonitor, grokMonitor: grokMonitor)
+        )
+        // Closing must not destroy it: the delegate keeps the only reference,
+        // and a released window would leave that reference dangling.
+        window.isReleasedWhenClosed = false
+        return window
     }
 
     @objc func quit() {
@@ -128,7 +187,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         usageMonitor.onUsageUpdate = { [weak self] in
             self?.updateMenuBar()
         }
+        grokMonitor.onUpdate = { [weak self] in
+            self?.updateMenuBar()
+        }
         usageMonitor.startMonitoring()
+        grokMonitor.startMonitoring()
     }
 
     /// One line per profile when there is more than one, at a smaller size so
@@ -164,17 +227,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         (button.cell as? NSButtonCell)?.usesSingleLineMode = false
         button.lineBreakMode = .byClipping
 
-        let multiline = accounts.count > 1
+        // One entry per thing worth reporting: each Claude profile, then Grok.
+        // Built as a flat list first because how many *lines* they get is a
+        // separate decision from how many entries there are.
         let ordered = usageMonitor.orderedForDisplay
+        var entries: [(text: String, color: NSColor, stale: Bool)] = ordered.map {
+            (values(for: $0), dotColor(for: $0), $0.isStale)
+        }
+        if let grokLine = grokMenuBarLine() {
+            entries.append((grokLine, grokDotColor(),
+                            grokMonitor.usage != nil && grokMonitor.error != nil))
+        }
 
+        // Two lines is the ceiling, and it is set by the menu bar, not by taste:
+        // the row is ~22pt, and two 10.5pt lines already fill it. A third line
+        // would need roughly 7pt to fit, which is past legible — so extra
+        // entries share the last line rather than adding one. Before this, a
+        // second profile plus Grok made three lines that overflowed and got
+        // anchored to the top, clipping the first one.
+        let lines: [[(text: String, color: NSColor, stale: Bool)]]
+        switch entries.count {
+        case 0: lines = []
+        case 1: lines = [entries]
+        default: lines = [[entries[0]], Array(entries.dropFirst())]
+        }
+
+        let multiline = lines.count > 1
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .left
         paragraph.lineBreakMode = .byClipping
         if multiline {
-            // Two lines have to fit the ~24pt menu bar. Left to its natural
-            // leading the block overflows and gets anchored to the top, which
-            // reads as "sitting too high" — so clamp the line box and nudge the
-            // baseline down to centre it.
+            // Left to its natural leading the block overflows and gets anchored
+            // to the top, which reads as "sitting too high" — so clamp the line
+            // box and nudge the baseline down to centre it.
             paragraph.maximumLineHeight = 10.5
             paragraph.minimumLineHeight = 10.5
         }
@@ -183,32 +268,84 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let baseline: CGFloat = multiline ? -2.5 : 0
         let title = NSMutableAttributedString()
 
-        for (index, account) in ordered.enumerated() {
-            if index > 0 { title.append(NSAttributedString(string: "\n")) }
+        for (lineIndex, line) in lines.enumerated() {
+            if lineIndex > 0 { title.append(NSAttributedString(string: "\n")) }
 
-            // A hollow dot marks a reading that could not be refreshed. It costs
-            // no width — which a badge or an extra glyph would, and this row has
-            // to stay clear of the notch — and pairs with the dimmed numbers.
-            let dot = NSAttributedString(string: account.isStale ? "○ " : "● ", attributes: [
-                .font: NSFont.systemFont(ofSize: size),
-                .foregroundColor: dotColor(for: account),
-                .paragraphStyle: paragraph,
-                .baselineOffset: baseline
-            ])
-            title.append(dot)
+            for (entryIndex, entry) in line.enumerated() {
+                // Two spaces between entries sharing a line: enough to read as
+                // separate readings without spending the width a glyph would.
+                if entryIndex > 0 { title.append(NSAttributedString(string: "  ", attributes: [
+                    .font: NSFont.systemFont(ofSize: size),
+                    .paragraphStyle: paragraph,
+                    .baselineOffset: baseline
+                ])) }
 
-            title.append(NSAttributedString(string: values(for: account), attributes: [
-                // Monospaced digits keep the width stable as the numbers tick,
-                // so the rest of the menu bar doesn't shuffle every refresh.
-                .font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium),
-                .foregroundColor: account.isStale ? NSColor.secondaryLabelColor : NSColor.labelColor,
-                .paragraphStyle: paragraph,
-                .baselineOffset: baseline
-            ]))
+                // A hollow dot marks a reading that could not be refreshed. It
+                // costs no width — which a badge or an extra glyph would, and
+                // this row has to stay clear of the notch — and pairs with the
+                // dimmed numbers.
+                title.append(NSAttributedString(string: entry.stale ? "\u{25CB} " : "\u{25CF} ", attributes: [
+                    .font: NSFont.systemFont(ofSize: size),
+                    .foregroundColor: entry.color,
+                    .paragraphStyle: paragraph,
+                    .baselineOffset: baseline
+                ]))
+                title.append(NSAttributedString(string: entry.text, attributes: [
+                    // Monospaced digits keep the width stable as the numbers
+                    // tick, so the rest of the menu bar doesn't shuffle every
+                    // refresh.
+                    .font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium),
+                    .foregroundColor: entry.stale ? NSColor.secondaryLabelColor : NSColor.labelColor,
+                    .paragraphStyle: paragraph,
+                    .baselineOffset: baseline
+                ]))
+            }
         }
 
         button.attributedTitle = title
-        button.toolTip = ordered.map(tooltip(for:)).joined(separator: "\n\n")
+        var tooltips = ordered.map(tooltip(for:))
+        if let grokTooltip = grokTooltip() { tooltips.append(grokTooltip) }
+        button.toolTip = tooltips.joined(separator: "\n\n")
+    }
+
+    /// The Grok row's text, or nil when there is no cookie on file — an
+    /// unconfigured Grok must not cost a menu bar line, least of all on a
+    /// notched Mac.
+    private func grokMenuBarLine() -> String? {
+        // A Grok row is earned by having something to say. With no CLI on the
+        // machine there is nothing to report, and a menu bar line costs width
+        // that matters on a notched Mac.
+        guard grokMonitor.isAvailable else { return nil }
+        guard let remaining = grokMonitor.usage?.displayRemaining else {
+            return "Grok " + UsageStyle.unknownValue
+        }
+        return "Grok " + UsageStyle.percentValue(remaining)
+    }
+
+    private func grokDotColor() -> NSColor {
+        guard let remaining = grokMonitor.usage?.displayRemaining else {
+            return .secondaryLabelColor
+        }
+        return NSColor(UsageStyle.color(remaining: remaining))
+    }
+
+    private func grokTooltip() -> String? {
+        guard grokMonitor.isAvailable else { return nil }
+        var lines = ["Grok" + (grokMonitor.usage?.tier.map { " · \($0)" } ?? "")]
+        if let usage = grokMonitor.usage {
+            lines.append(usage.periodLabel + ": " + UsageStyle.percentLeft(usage.displayRemaining))
+            if let end = usage.periodEnd {
+                lines.append("Resets " + UsageStyle.relativeTime.localizedString(for: end, relativeTo: Date()))
+            }
+            if grokMonitor.error != nil {
+                lines.append("Not refreshed — showing usage from "
+                             + UsageStyle.relativeTime.localizedString(for: usage.fetchedAt, relativeTo: Date()))
+            }
+        }
+        if let error = grokMonitor.error {
+            lines.append(error.localizedDescription)
+        }
+        return lines.joined(separator: "\n")
     }
 
     /// Neutral when there is no usable figure — a missing reading must not wear
@@ -334,6 +471,7 @@ struct PopoverContentView: View {
     /// Observed directly — the monitor's @Published changes don't propagate
     /// through AppDelegate, so observing the delegate would leave this stale.
     @ObservedObject var usageMonitor: UsageMonitor
+    @ObservedObject var grokMonitor: GrokMonitor
     let appDelegate: AppDelegate
 
     /// Each profile gets its own column; the popover widens to match.
@@ -399,6 +537,11 @@ struct PopoverContentView: View {
                     }
                 }
                 Spacer(minLength: 0)
+            }
+
+            if grokMonitor.isAvailable {
+                Divider()
+                GrokRowView(monitor: grokMonitor)
             }
 
             Divider()
@@ -652,10 +795,71 @@ struct UsageBar: View {
     }
 }
 
+/// The Grok line in the popover: label, remaining headroom, and a bar.
+///
+/// A row rather than a column. Grok contributes one figure, not the stack of
+/// session/weekly/per-model caps a Claude profile does, and giving it a column
+/// of its own would leave most of that column empty.
+struct GrokRowView: View {
+    @ObservedObject var monitor: GrokMonitor
+
+    private var isStale: Bool { monitor.usage != nil && monitor.error != nil }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text("Grok")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                if let usage = monitor.usage {
+                    Text(usage.periodLabel)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                Text(UsageStyle.percentLeft(monitor.usage?.displayRemaining))
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundColor(isStale ? .secondary : .primary)
+            }
+
+            if let remaining = monitor.usage?.displayRemaining {
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Color.secondary.opacity(0.2))
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(UsageStyle.color(remaining: remaining).opacity(isStale ? 0.4 : 1))
+                            .frame(width: geometry.size.width * CGFloat(remaining) / 100)
+                    }
+                }
+                .frame(height: 6)
+            }
+
+            if let end = monitor.usage?.periodEnd, monitor.error == nil {
+                Text("Resets " + UsageStyle.relativeTime.localizedString(for: end, relativeTo: Date()))
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+
+            if let error = monitor.error {
+                Text(error.localizedDescription)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
 // MARK: - Settings View
 
 struct SettingsView: View {
     @ObservedObject var usageMonitor: UsageMonitor
+    @ObservedObject var grokMonitor: GrokMonitor
+
+    @State private var showsGrokPathEntry = false
+    @State private var grokPathDraft = ""
 
     /// Reads the *resolved* primary rather than the persisted string: once the
     /// stored profile is logged out the menu bar tracks the fallback, and a
@@ -678,6 +882,18 @@ struct SettingsView: View {
         }
     }
 
+    /// What the Grok section reports: the live figure when the CLI answers, the
+    /// failure when it doesn't. A bare "configured" would be useless — a CLI
+    /// that is installed but signed out looks identical.
+    private var grokStatusText: String {
+        if let error = grokMonitor.error {
+            return error.localizedDescription.replacingOccurrences(of: "\n", with: " ")
+        }
+        guard let usage = grokMonitor.usage else { return "Checking…" }
+        guard let remaining = usage.displayRemaining else { return "Period rolled over — refreshing" }
+        return "\(usage.periodLabel): \(remaining)% left"
+    }
+
     var body: some View {
         Form {
             Section("Menu Bar") {
@@ -696,6 +912,50 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
+            }
+
+            Section("Grok") {
+                HStack {
+                    Text(grokStatusText)
+                        .font(.callout)
+                        .foregroundColor(grokMonitor.error == nil ? .primary : .orange)
+                    Spacer()
+                    if let tier = grokMonitor.usage?.tier {
+                        Text(tier).font(.caption).foregroundColor(.secondary)
+                    }
+                }
+
+                if let path = grokMonitor.cliPath {
+                    Text(path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .textSelection(.enabled)
+                }
+
+                DisclosureGroup("Grok CLI is somewhere else", isExpanded: $showsGrokPathEntry) {
+                    TextField("/path/to/grok", text: $grokPathDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { grokMonitor.cliPathOverride = grokPathDraft }
+                    HStack {
+                        Button("Use this path") { grokMonitor.cliPathOverride = grokPathDraft }
+                            .disabled(grokPathDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Button("Reset") {
+                            grokPathDraft = ""
+                            grokMonitor.cliPathOverride = nil
+                        }
+                        Spacer()
+                    }
+                }
+                .font(.caption)
+
+                Text("""
+                    Read from the Grok CLI, which is already signed in — nothing to \
+                    configure and no cookie to paste. The app asks it for the billing \
+                    period over its own protocol; no model is called and no quota is \
+                    spent. If the row is empty, run `grok login` in a terminal.
+                    """)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
 
             Section("Profiles") {
@@ -741,7 +1001,10 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 460)
-        .onAppear { usageMonitor.refreshIfStale() }
+        .frame(minWidth: 520, minHeight: 560)
+        .onAppear {
+            usageMonitor.refreshIfStale()
+            grokMonitor.refreshIfStale()
+        }
     }
 }
