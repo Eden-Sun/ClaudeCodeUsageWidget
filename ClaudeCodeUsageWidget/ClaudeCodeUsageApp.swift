@@ -238,24 +238,71 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             entries.append((grokLine, grokDotColor(),
                             grokMonitor.usage != nil && grokMonitor.error != nil))
         }
+        guard !entries.isEmpty else { return }
 
-        // Two lines is the ceiling, and it is set by the menu bar, not by taste:
-        // the row is ~22pt, and two 10.5pt lines already fill it. A third line
-        // would need roughly 7pt to fit, which is past legible — so extra
-        // entries share the last line rather than adding one. Before this, a
-        // second profile plus Grok made three lines that overflowed and got
-        // anchored to the top, clipping the first one.
-        let lines: [[(text: String, color: NSColor, stale: Bool)]]
-        switch entries.count {
-        case 0: lines = []
-        case 1: lines = [entries]
-        default: lines = [[entries[0]], Array(entries.dropFirst())]
+        // Two rows, filled top-to-bottom then left-to-right, so four entries
+        // read as a grid:
+        //
+        //     cc0   cc2
+        //     cc1   grok
+        //
+        // Two is the ceiling and the menu bar sets it, not taste: the row is
+        // ~22pt and two 10.5pt lines already fill it, so a third would need
+        // about 7pt — past legible. Growing sideways instead keeps every entry
+        // full size. Column-major because a new profile should push the layout
+        // wider rather than reshuffling which row the existing ones sit on.
+        let rowCount = entries.count > 1 ? 2 : 1
+        let columnCount = (entries.count + rowCount - 1) / rowCount
+        var grid: [[(text: String, color: NSColor, stale: Bool)?]] =
+            Array(repeating: Array(repeating: nil, count: columnCount), count: rowCount)
+        for (index, entry) in entries.enumerated() {
+            grid[index % rowCount][index / rowCount] = entry
         }
 
-        let multiline = lines.count > 1
+        let multiline = rowCount > 1
+        let size: CGFloat = multiline ? 10.5 : NSFont.systemFontSize
+        let baseline: CGFloat = multiline ? -2.5 : 0
+        let dotFont = NSFont.systemFont(ofSize: size)
+        let textFont = NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium)
+
+        /// One cell, without the paragraph style — that is applied to the whole
+        /// string at the end, once the tab stops are known.
+        func cell(_ entry: (text: String, color: NSColor, stale: Bool)) -> NSAttributedString {
+            let result = NSMutableAttributedString()
+            // A hollow dot marks a reading that could not be refreshed. It costs
+            // no width — which a badge or an extra glyph would, and this row has
+            // to stay clear of the notch — and pairs with the dimmed numbers.
+            result.append(NSAttributedString(string: entry.stale ? "\u{25CB} " : "\u{25CF} ",
+                                             attributes: [.font: dotFont, .foregroundColor: entry.color]))
+            // Monospaced digits keep the width stable as the numbers tick, so
+            // the rest of the menu bar doesn't shuffle every refresh.
+            result.append(NSAttributedString(string: entry.text, attributes: [
+                .font: textFont,
+                .foregroundColor: entry.stale ? NSColor.secondaryLabelColor : NSColor.labelColor
+            ]))
+            return result
+        }
+
+        let cells = grid.map { row in row.map { $0.map(cell) } }
+
+        // Tab stops rather than padding spaces: the columns hold different
+        // labels ("84 59" against "Grok 86"), so spaces would leave the second
+        // column ragged between rows.
+        let gutter: CGFloat = 10
+        var tabStops: [NSTextTab] = []
+        var offset: CGFloat = 0
+        for column in 0..<columnCount {
+            let widest = cells.compactMap { $0[column]?.size().width }.max() ?? 0
+            offset += widest + gutter
+            if column + 1 < columnCount {
+                tabStops.append(NSTextTab(textAlignment: .left, location: offset))
+            }
+        }
+
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .left
         paragraph.lineBreakMode = .byClipping
+        paragraph.tabStops = tabStops
         if multiline {
             // Left to its natural leading the block overflows and gets anchored
             // to the top, which reads as "sitting too high" — so clamp the line
@@ -264,43 +311,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             paragraph.minimumLineHeight = 10.5
         }
 
-        let size: CGFloat = multiline ? 10.5 : NSFont.systemFontSize
-        let baseline: CGFloat = multiline ? -2.5 : 0
         let title = NSMutableAttributedString()
-
-        for (lineIndex, line) in lines.enumerated() {
-            if lineIndex > 0 { title.append(NSAttributedString(string: "\n")) }
-
-            for (entryIndex, entry) in line.enumerated() {
-                // Two spaces between entries sharing a line: enough to read as
-                // separate readings without spending the width a glyph would.
-                if entryIndex > 0 { title.append(NSAttributedString(string: "  ", attributes: [
-                    .font: NSFont.systemFont(ofSize: size),
-                    .paragraphStyle: paragraph,
-                    .baselineOffset: baseline
-                ])) }
-
-                // A hollow dot marks a reading that could not be refreshed. It
-                // costs no width — which a badge or an extra glyph would, and
-                // this row has to stay clear of the notch — and pairs with the
-                // dimmed numbers.
-                title.append(NSAttributedString(string: entry.stale ? "\u{25CB} " : "\u{25CF} ", attributes: [
-                    .font: NSFont.systemFont(ofSize: size),
-                    .foregroundColor: entry.color,
-                    .paragraphStyle: paragraph,
-                    .baselineOffset: baseline
-                ]))
-                title.append(NSAttributedString(string: entry.text, attributes: [
-                    // Monospaced digits keep the width stable as the numbers
-                    // tick, so the rest of the menu bar doesn't shuffle every
-                    // refresh.
-                    .font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium),
-                    .foregroundColor: entry.stale ? NSColor.secondaryLabelColor : NSColor.labelColor,
-                    .paragraphStyle: paragraph,
-                    .baselineOffset: baseline
-                ]))
+        for (rowIndex, row) in cells.enumerated() {
+            if rowIndex > 0 { title.append(NSAttributedString(string: "\n")) }
+            for (columnIndex, cell) in row.enumerated() {
+                if columnIndex > 0 { title.append(NSAttributedString(string: "\t")) }
+                // A short column can run out of entries before the row does;
+                // the tab still has to be written so the next column lines up.
+                if let cell = cell { title.append(cell) }
             }
         }
+        title.addAttributes([.paragraphStyle: paragraph, .baselineOffset: baseline],
+                            range: NSRange(location: 0, length: title.length))
 
         button.attributedTitle = title
         var tooltips = ordered.map(tooltip(for:))

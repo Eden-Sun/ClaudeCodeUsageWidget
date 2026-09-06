@@ -158,10 +158,21 @@ reading still tells you where you stand.
 **Colour.** Tracks the 5-hour window's remaining percentage: green above 50%,
 yellow 20–50%, red at or below 20%.
 
-**Menu bar layout.** Two lines, maximum. The row is about 22pt tall and two
-10.5pt lines already fill it; a third would need roughly 7pt, which is past
-legible. So the first line carries the primary profile and any further entries —
-other profiles, Grok — share the second, each keeping its own status dot.
+**Menu bar layout.** A grid of two rows, filled top-to-bottom then
+left-to-right — three Claude profiles and Grok read as:
+
+```
+● cc0   ● cc2
+● cc1   ● Grok 86
+```
+
+Two rows is the ceiling, and the menu bar sets it rather than taste: the row is
+about 22pt and two 10.5pt lines already fill it, so a third would need roughly
+7pt, past legible. Extra entries therefore widen the item instead of shrinking
+it, and the fill is column-major so adding a profile pushes the layout wider
+rather than reshuffling which row the existing ones sit on. Columns are aligned
+with tab stops, since the labels differ in width and padding spaces would leave
+the second column ragged.
 
 ## API
 
