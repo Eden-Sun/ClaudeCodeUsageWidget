@@ -135,6 +135,16 @@ class KeychainHelper {
                  .filter { $0.hasPrefix(Self.servicePrefix) }
         )
 
+        // When each profile was first logged in, which is what the display is
+        // ordered by. Taken from the attributes already in hand, so it costs
+        // nothing. A service with several accounts under it takes the earliest.
+        var createdAt: [String: Date] = [:]
+        for item in items {
+            guard let service = item[kSecAttrService as String] as? String,
+                  let created = item[kSecAttrCreationDate as String] as? Date else { continue }
+            createdAt[service] = min(createdAt[service] ?? created, created)
+        }
+
         let byHash = configDirsByHash()
 
         return services.map { service in
@@ -150,8 +160,25 @@ class KeychainHelper {
                 configDir: dir
             )
         }
-        // Default first, then alphabetical — stable ordering across refreshes.
-        .sorted { ($0.isDefault ? 0 : 1, $0.label) < ($1.isDefault ? 0 : 1, $1.label) }
+        // Oldest login first.
+        //
+        // Alphabetical was the obvious choice and the wrong one: it sorted
+        // "cc2" ahead of "ccompany" on the third character, so adding a profile
+        // reshuffled the ones already on screen into an order that matched
+        // nothing the user knew. Login order is what they actually remember,
+        // and it only ever appends — a new profile lands at the end and leaves
+        // every existing position alone.
+        //
+        // `claude login` on an existing profile rewrites the item in place and
+        // leaves its creation date untouched, so re-authenticating does not
+        // move a profile. A full logout and back in does, since that is a new
+        // item; the label breaks ties so a slot with no date left is still
+        // ordered predictably.
+        .sorted {
+            let left = createdAt[$0.service] ?? .distantFuture
+            let right = createdAt[$1.service] ?? .distantFuture
+            return left == right ? $0.label < $1.label : left < right
+        }
     }
 
     /// Maps `sha256(configDir)[0..<8]` to the directory, by hashing every

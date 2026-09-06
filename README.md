@@ -74,7 +74,12 @@ Every `CLAUDE_CONFIG_DIR` you have logged in gets its own Keychain slot, its own
 column in the popover, and its own line in the menu bar.
 
 Profiles are rediscovered on every poll, so a login or logout shows up without a
-restart. The only setting is which profile the menu bar leads with — **Settings
+restart. They are ordered by when each was first logged in, so a new one lands
+at the end and leaves the existing positions alone. (Alphabetical was the
+obvious choice and the wrong one — it sorts `cc2` ahead of `ccompany` on the
+third character, reshuffling profiles already on screen into an order matching
+nothing the user knew.) Re-running `claude login` on an existing profile
+rewrites its Keychain item in place and does not move it. The only setting is which profile the menu bar leads with — **Settings
 → Show account**, or right-click the menu bar item and pick one under **Menu bar
 shows**. It is remembered across relaunches.
 
